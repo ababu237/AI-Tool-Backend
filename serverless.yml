@@ -1,0 +1,270 @@
+service: healthcare-ai-backend
+
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: python3.11
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 1024
+  timeout: 300
+  versionFunctions: false
+
+  # Environment variables
+  environment:
+    STAGE: ${self:provider.stage}
+    REGION: ${self:provider.region}
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    API_SECRET_KEY: ${env:API_SECRET_KEY, 'default-dev-key'}
+    ALLOWED_ORIGINS: ${env:ALLOWED_ORIGINS, 'http://localhost:3000,https://*.amazonaws.com'}
+
+  # IAM Role permissions
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+          Resource:
+            - "arn:aws:s3:::healthcare-ai-storage-${self:provider.stage}/*"
+        - Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          Resource:
+            - "arn:aws:logs:${self:provider.region}:*:log-group:/aws/lambda/*"
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+            - ssm:GetParameters
+          Resource:
+            - "arn:aws:ssm:${self:provider.region}:*:parameter/healthcare-ai/${self:provider.stage}/*"
+
+functions:
+  # Main Healthcare API Application
+  healthcareApi:
+    handler: main.handler
+    name: healthcare-ai-${self:provider.stage}
+    description: "Healthcare AI Backend - Unified FastAPI Application"
+    events:
+      - httpApi:
+          path: /
+          method: any
+      - httpApi:
+          path: /{proxy+}
+          method: any
+    layers:
+      - ${cf:python-deps-layer-${self:provider.stage}.PythonDepsLayerExport}
+    environment:
+      PYTHONPATH: "/var/runtime:/var/task:/opt/python"
+
+  # Individual function endpoints (optional - for specific scaling)
+  clinicalChat:
+    handler: main.clinical_chat_handler
+    name: clinical-chat-${self:provider.stage}
+    description: "Clinical Chat AI Service"
+    memorySize: 512
+    timeout: 180
+    events:
+      - httpApi:
+          path: /clinical_chat
+          method: post
+
+  documentProcessor:
+    handler: main.document_processor_handler
+    name: document-processor-${self:provider.stage}
+    description: "Medical Document Analysis Service"
+    memorySize: 1536
+    timeout: 300
+    events:
+      - httpApi:
+          path: /process_document
+          method: post
+
+  transcriptionService:
+    handler: main.transcription_handler
+    name: transcription-service-${self:provider.stage}
+    description: "Audio Transcription Service"
+    memorySize: 1024
+    timeout: 240
+    events:
+      - httpApi:
+          path: /transcribe_audio
+          method: post
+
+  organAnalyzer:
+    handler: main.organ_analyzer_handler
+    name: organ-analyzer-${self:provider.stage}
+    description: "Medical Organ Analysis Service"
+    memorySize: 2048
+    timeout: 300
+    events:
+      - httpApi:
+          path: /analyze_organ_scan
+          method: post
+
+plugins:
+  - serverless-python-requirements
+  - serverless-plugin-warmup
+  - serverless-plugin-split-stacks
+  - serverless-domain-manager
+
+custom:
+  # Python Requirements Configuration
+  pythonRequirements:
+    dockerizePip: non-linux
+    zip: true
+    slim: true
+    strip: false
+    layer:
+      name: python-deps-layer-${self:provider.stage}
+      description: "Python dependencies layer for healthcare AI"
+      compatibleRuntimes:
+        - python3.11
+      retain: false
+    pipCmdExtraArgs:
+      - --no-cache-dir
+      - --disable-pip-version-check
+    noDeploy:
+      - boto3
+      - botocore
+      - docutils
+      - jmespath
+      - pip
+      - setuptools
+
+  # Warmup Configuration (prevent cold starts)
+  warmup:
+    enabled: true
+    prewarm: true
+    events:
+      - schedule: rate(5 minutes)
+    timeout: 20
+    memorySize: 256
+
+  # Split Stacks (for large deployments)
+  splitStacks:
+    perFunction: false
+    perType: true
+
+  # Custom Domain Configuration
+  customDomain:
+    domainName: ${env:CUSTOM_DOMAIN, ''}
+    stage: ${self:provider.stage}
+    certificateName: ${env:SSL_CERTIFICATE, ''}
+    createRoute53Record: true
+    endpointType: "regional"
+    securityPolicy: tls_1_2
+    apiType: http
+    autoDomain: false
+
+# CloudFormation Resources
+resources:
+  Resources:
+    # S3 Bucket for file storage
+    HealthcareStorageBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: healthcare-ai-storage-${self:provider.stage}
+        VersioningConfiguration:
+          Status: Enabled
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        BucketEncryption:
+          ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        LifecycleConfiguration:
+          Rules:
+            - Id: DeleteTempFiles
+              Status: Enabled
+              ExpirationInDays: 1
+              Prefix: "temp/"
+            - Id: DeleteOldVersions
+              Status: Enabled
+              NoncurrentVersionExpirationInDays: 7
+
+    # CloudWatch Log Groups
+    ApiLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: /aws/lambda/healthcare-ai-${self:provider.stage}
+        RetentionInDays: 14
+
+    # API Gateway CORS Configuration
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+        ResponseType: DEFAULT_4XX
+        RestApiId: !Ref HttpApi
+
+    GatewayResponseDefault5XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+        ResponseType: DEFAULT_5XX
+        RestApiId: !Ref HttpApi
+
+  Outputs:
+    # API Gateway URL
+    ApiGatewayUrl:
+      Description: "API Gateway endpoint URL"
+      Value: !Sub "https://${HttpApi}.execute-api.${self:provider.region}.amazonaws.com/${self:provider.stage}"
+      Export:
+        Name: HealthcareApiUrl-${self:provider.stage}
+
+    # S3 Bucket Name
+    StorageBucketName:
+      Description: "S3 bucket for healthcare data storage"
+      Value: !Ref HealthcareStorageBucket
+      Export:
+        Name: HealthcareStorageBucket-${self:provider.stage}
+
+# Package Configuration
+package:
+  patterns:
+    # Include
+    - main.py
+    - backend_api/**
+    - config/**
+    - requirements.txt
+    - "!config/config.json" # Exclude sensitive config
+
+    # Exclude
+    - "!node_modules/**"
+    - "!venv/**"
+    - "!.venv/**"
+    - "!__pycache__/**"
+    - "!.pytest_cache/**"
+    - "!tests/**"
+    - "!unit_tests/**"
+    - "!htmlcov/**"
+    - "!.coverage"
+    - "!.git/**"
+    - "!.gitignore"
+    - "!README.md"
+    - "!*.log"
+    - "!temp_audio/**"
+    - "!audio_outputs/**"
+    - "!audios/**"
+    - "!translated_csvs/**"
+    - "!frontend_screens/**"
+    - "!healthcare-frontend/**"
+    - "!*.md"
+    - "!pytest.ini"
+    - "!.env*"
+    - "!serverless.yml"
