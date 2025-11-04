@@ -1,0 +1,1 @@
+web: gunicorn backend_api.master_backend_api:app --workers=3 --worker-class uvicorn.workers.UvicornWorker --bind=0.0.0.0:$PORT --timeout=180

@@ -12,7 +12,7 @@ pydantic==2.6.4
 gunicorn==21.2.0
 
 # --- AI / LLM Integration ---
-openai==1.13.3
+openai==0.28.0
 tiktoken==0.6.0
 
 # --- Document / File Processing ---
@@ -22,15 +22,6 @@ openpyxl==3.1.2          # Optional (Excel support)
 
 # --- DataFrame / CSV ---
 pandas==2.2.1
-pandas==2.2.1
-numpy==1.26.4
-pillow==10.2.0
-langchain_openai==0.0.8
-langchain_community==0.0.12
-langchain_core==0.0.23
-langchain_multimodal==0.0.6
-langchain==0.0.348
-opencv-python-headless==4.9.0.80
 
 # --- Audio / Speech ---
 gTTS==2.5.1
@@ -43,6 +34,15 @@ langdetect==1.0.9
 # --- Environment / Utilities ---
 python-dotenv==1.0.1
 requests==2.31.0
+pandas==2.2.1
+numpy==1.26.4
+pillow==10.2.0
+langchain_openai==0.0.8
+langchain_community==0.0.12
+langchain_core==0.0.23
+langchain_multimodal==0.0.6
+langchain==0.0.348
+opencv-python-headless==4.9.0.80
 
 # --- Optional Vision / Imaging (comment out if unused) ---
 # pillow==10.2.0
@@ -59,4 +59,3 @@ requests==2.31.0
 # --- Optional LangChain (uncomment if you use it) ---
 # langchain==0.1.13
 # langchain-openai==0.0.8
-

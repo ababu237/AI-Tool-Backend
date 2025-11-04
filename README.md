@@ -219,6 +219,77 @@ For issues and questions:
 
 ## 🔄 Updates
 
+### Unified Master Backend
+
+In addition to individual API processes, a consolidated FastAPI application lives at:
+
+`backend_api/master_backend_api.py`
+
+It exposes combined endpoints (clinical chat, document/csv processing, organ analyzer, transcription, translation, TTS) behind a single service. Enables simpler deployment vs launching multiple ports.
+
+Run locally:
+
+```bash
+uvicorn backend_api.master_backend_api:app --reload --port 8000
+```
+
+Optional API key security: set `MASTER_API_KEY` env var (client sends header `x-api-key`).
+
+Environment variables:
+
+```bash
+export OPENAI_API_KEY=sk-REPLACE
+export MASTER_API_KEY=your-secret          # optional
+export ALLOWED_ORIGINS=https://ai-tool-1-v9rj.onrender.com
+```
+
+Health & info endpoints:
+
+```
+GET /health  -> {"success": true, ...}
+GET /info    -> lists enabled capabilities & security flags
+```
+
+### Deploying Unified Backend to Render
+
+1. Add `requirements-backend.txt` as build reference or keep single `requirements.txt`.
+2. Include `Procfile` at repo root:
+
+```
+web: gunicorn backend_api.master_backend_api:app --workers=3 --worker-class uvicorn.workers.UvicornWorker --bind=0.0.0.0:$PORT --timeout=180
+```
+
+3. Configure Environment Vars in Render dashboard:
+
+- `OPENAI_API_KEY`
+- `MASTER_API_KEY` (optional)
+- `ALLOWED_ORIGINS` = https://ai-tool-1-v9rj.onrender.com
+
+4. Deploy web service. Use `/health` as health check.
+5. Frontend sets API key client-side (example in console):
+
+```javascript
+localStorage.setItem("MASTER_API_KEY", "<same MASTER_API_KEY value>");
+```
+
+### Frontend Integration Notes
+
+Merged frontend page `frontend_screens/merged_all_screens.html` auto-injects backend config via meta tags and `localStorage`. Ensure the meta `api-origin` points to backend origin if different from current page.
+
+### Troubleshooting (Unified Backend)
+
+| Issue                      | Cause                               | Fix                                            |
+| -------------------------- | ----------------------------------- | ---------------------------------------------- |
+| 401 Unauthorized           | Missing/incorrect API key           | Set `MASTER_API_KEY` env & localStorage key    |
+| CORS blocked               | Origin mismatch                     | Update `ALLOWED_ORIGINS` to exact frontend URL |
+| 500 on document/csv        | Missing OpenAI key or empty file    | Provide real key, use real PDF/CSV             |
+| Organ analyzer unavailable | Torch/TorchVision import failure    | Install dependencies or hide feature           |
+| CSV processing disabled    | LangChain CSV agent import mismatch | Pin compatible LangChain versions              |
+
+### Scaling Guidance
+
+Increase workers: `--workers=2*CPU+1`. Raise `--timeout` for large PDFs. Add rate limiting (SlowAPI) and structured logging for production.
+
 - **v1.0.0** - Initial release with all 6 healthcare APIs
 - **v1.1.0** - Added main launcher script with process management
 - **v1.2.0** - Enhanced error handling and health monitoring
